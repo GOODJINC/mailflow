@@ -93,7 +93,7 @@ async function connectImapClient(account, resolved, cfgOpts, timeoutMs, label) {
       if (isConnectionRefusal(extractImapError(err))) sawRefusal = true;
       if (abandoned) return;
       recordWarning('imap_error', account?.id);
-      console.error(`IMAP error for ${logAccount(account)}:`, err.message);
+      console.error(`IMAP error for ${logAccount(account)}:`, extractImapError(err));
     });
     // Admission control (#384): cap concurrent connection establishment per host so a startup /
     // backfill burst can't stampede the provider into refusals. Held only for the handshake and
