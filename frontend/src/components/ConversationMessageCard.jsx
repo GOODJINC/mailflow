@@ -11,6 +11,9 @@ import { buildPrintDocument, openPrintWindow, printInWindow } from '../utils/pri
 import { openReplyFromMessage, openForwardFromMessage } from '../utils/composeFromMessage.js';
 import { shortcutBus } from '../utils/shortcutBus.js';
 import MessageBodyView from './MessageBodyView.jsx';
+import AiResultBox from './AiResultBox.jsx';
+import { useAiActions } from '../hooks/useAiActions.js';
+import { BUILTIN_SUMMARIZE } from '../aiActions.js';
 
 // One message inside a conversation.
 //
@@ -37,7 +40,7 @@ function CardBtn({ onClick, children }) {
 // Design from #317 by YunQue0912.
 // `onUpdate(id, patch)` applies a flag change to the conversation's own copy of the message and to
 // the list's, since the pane holds the thread apart from the list.
-export default function ConversationMessageCard({ message, expanded, onToggle, onUpdate, selected = false }) {
+export default function ConversationMessageCard({ message, expanded, onToggle, onUpdate, aiEnabled = false, selected = false }) {
   const { t } = useTranslation();
   const accounts = useStore(s => s.accounts);
   const openCompose = useStore(s => s.openCompose);
@@ -112,6 +115,9 @@ export default function ConversationMessageCard({ message, expanded, onToggle, o
   }, [expanded, message.id]);
 
   const loadedBody = async () => body;
+  const ai = useAiActions(message.id, body);
+  const [showAiMenu, setShowAiMenu] = useState(false);
+  const runAi = (action) => { setShowAiMenu(false); ai.run(action); };
 
   const handleStar = async () => {
     const starred = !message.is_starred;
@@ -230,6 +236,23 @@ export default function ConversationMessageCard({ message, expanded, onToggle, o
             </div>
           )}
           {error && <div style={{ color: 'var(--red, #e03131)', fontSize: 13 }}>{error}</div>}
+          {/* AI results pinned above the message, as in the reading pane (#204). */}
+          {Object.keys(ai.results).length > 0 && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10, margin: '4px 0 12px' }}>
+              {Object.entries(ai.results).map(([key, result]) => {
+                const action = ai.actionFor(key);
+                return (
+                  <AiResultBox
+                    key={key}
+                    result={result}
+                    canRegen={!!action}
+                    onRegen={() => action && ai.run(action, { force: true })}
+                    onDismiss={() => ai.dismiss(key)}
+                  />
+                );
+              })}
+            </div>
+          )}
           {body?.html && (
             <MessageBodyView
               iframeRef={iframeRef}
@@ -268,6 +291,33 @@ export default function ConversationMessageCard({ message, expanded, onToggle, o
             )}
             <CardBtn onClick={handlePrint}>{t('message.print')}</CardBtn>
             <CardBtn onClick={() => downloadEml(message.id)}>{t('message.downloadEml')}</CardBtn>
+            {aiEnabled && body && (
+              <div style={{ position: 'relative' }}>
+                <CardBtn onClick={() => setShowAiMenu(v => !v)}>{t('message.aiActions')}</CardBtn>
+                {showAiMenu && (
+                  <div role="menu" style={{
+                    position: 'absolute', bottom: 'calc(100% + 4px)', left: 0, zIndex: 20, minWidth: 180,
+                    background: 'var(--bg-elevated)', border: '1px solid var(--border)', borderRadius: 8,
+                    boxShadow: '0 8px 24px rgba(0,0,0,0.25)', padding: 4,
+                  }}>
+                    {[{ ...BUILTIN_SUMMARIZE, label: t('message.summarize') }, ...(ai.aiActions || [])].map(action => (
+                      <button
+                        key={action.id}
+                        role="menuitem"
+                        onClick={() => runAi(action)}
+                        style={{
+                          display: 'block', width: '100%', textAlign: 'left', padding: '8px 10px',
+                          background: 'none', border: 'none', borderRadius: 6, cursor: 'pointer',
+                          color: 'var(--text-primary)', font: 'inherit', fontSize: 13,
+                        }}
+                      >
+                        {action.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       )}

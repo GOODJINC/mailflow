@@ -50,6 +50,12 @@ export default function ConversationPane({ threadId, folder, unified = false, se
   // { x, y, view } — the move and snooze pickers are ContextMenu's, opened straight
   // into the relevant sub-view rather than reimplemented here.
   const [picker, setPicker] = useState(null);
+  const [aiStatus, setAiStatus] = useState(null);
+
+  useEffect(() => {
+    api.ai.status().then(setAiStatus).catch(() => {});
+  }, []);
+  const aiEnabled = Boolean(aiStatus?.enabled && aiStatus?.features?.summarize);
 
   useEffect(() => {
     if (!threadId) { setMessages([]); return; }
@@ -217,6 +223,7 @@ export default function ConversationPane({ threadId, folder, unified = false, se
           selected={message.id === selectedMessageId}
           onToggle={toggle}
           onUpdate={updateConversationMessage}
+          aiEnabled={aiEnabled}
         />
       ))}
     </div>

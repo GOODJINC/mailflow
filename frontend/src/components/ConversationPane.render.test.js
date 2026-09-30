@@ -224,6 +224,11 @@ describe('conversation actions', () => {
     realFetch = globalThis.fetch;
     globalThis.fetch = async (url, opts = {}) => {
       requests.push({ url: String(url), method: opts.method || 'GET', body: opts.body });
+      if (String(url).includes('/ai/status')) return { ok: true, status: 200, json: async () => ({ enabled: true, features: { summarize: true } }) };
+      if (String(url).includes('/ai/chat')) {
+        const sse = 'data: {"choices":[{"delta":{"content":"Short "}}]}\n\ndata: {"choices":[{"delta":{"content":"summary."}}]}\n\ndata: [DONE]\n\n';
+        return new Response(sse, { status: 200, headers: { 'Content-Type': 'text/event-stream' } });
+      }
       return realFetch(url, opts);
     };
     dom.window.open = () => {
@@ -279,6 +284,21 @@ describe('conversation actions', () => {
     const at = ['m1', 'm2', 'm3'].map(id => doc.indexOf(`body of ${id}`));
     assert.ok(at.every(i => i > 0), 'every message, including collapsed ones, is in the printout');
     assert.deepEqual([...at].sort((a, b) => a - b), at, 'in reading order');
+  });
+
+  test('AI actions run on the message and pin the result above it', async () => {
+    const aiButton = button('m1', 'message.aiActions');
+    assert.ok(aiButton, 'an open message offers AI actions when AI is enabled');
+    await click(aiButton);
+    const summarize = [...card('m1').querySelectorAll('[role="menuitem"]')].find(b => b.textContent === 'message.summarize');
+    assert.ok(summarize, 'the menu lists Summarize');
+    await click(summarize);
+    await React.act(async () => { await new Promise(r => setTimeout(r, 100)); });
+    const chat = requests.find(r => r.url.includes('/ai/chat'));
+    assert.ok(chat, 'the action went to the AI endpoint');
+    assert.match(JSON.parse(chat.body).messages[0].content, /body of m1/, 'with this message\'s text');
+    assert.match(card('m1').textContent, /Short summary\./, 'the result is pinned on this message');
+    assert.doesNotMatch(card('m3').textContent, /Short summary/, 'and only on this message');
   });
 
   test('the print shortcut prints the selected message', async () => {
