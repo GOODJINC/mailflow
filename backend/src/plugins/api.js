@@ -43,7 +43,7 @@ export const resolveLabelCopyUid = labelsWrite.resolveLabelCopyUid;
 
 // ── Archive ───────────────────────────────────────────────────────────────────
 // Archive a message's INBOX copy (used by GTD "done"). Engine bound by the platform.
-export const archiveInboxCopy = (account, inboxCopy) => _archiveInboxCopy(getMailEngine(), account, inboxCopy);
+export const archiveInboxCopy = (account, inboxCopy, fromFolder) => _archiveInboxCopy(getMailEngine(), account, inboxCopy, fromFolder);
 
 // ── Realtime broadcast ────────────────────────────────────────────────────────
 // Push a payload to a specific user's live sessions. A plugin can notify its own clients; it

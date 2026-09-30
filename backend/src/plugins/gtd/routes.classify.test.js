@@ -53,9 +53,11 @@ const account = { id: ACCT_ID, user_id: 'u1', folder_mappings: {} };
 
 // Route every query classify issues: the ownership-scoped message load, the account fetch
 // (POST copy path), and resolveCopyUid's sibling lookup (DELETE). Each is individually swappable
-// so a test can drive the not-owned (msg:null) / no-sibling (sibling:null) branches.
+// so a test can drive the not-owned (msg:null) / no-sibling (sibling:null) branches. `folders` is
+// where the message's live copies are, for the switch path and DELETE's only-copy check.
 function stubQueries({ msg = inboxMsg, acct = account, sibling = null, siblings = {}, folders = [], threadCopies = [], exact = { uid: 77 } } = {}) {
   query.mockImplementation(async (sql, params) => {
+    if (sql.includes("special_use = '\\Trash'")) return { rows: [{ path: 'Trash' }] };
     if (sql.includes('FROM messages m') && sql.includes('JOIN email_accounts')) return { rows: msg ? [msg] : [] };
     if (sql.startsWith('SELECT * FROM email_accounts')) return { rows: acct ? [acct] : [] };
     if (sql.includes('thread_key = ANY($2::text[])')) return { rows: threadCopies };
@@ -518,7 +520,7 @@ describe('POST /api/gtd/classify — apply a GTD label (COPY)', () => {
 
 describe('DELETE /api/gtd/classify — remove a GTD label', () => {
   it('removes the sibling copy in the state folder and returns removed:true', async () => {
-    stubQueries({ sibling: { uid: 42 } });
+    stubQueries({ sibling: { uid: 42 }, folders: ['INBOX', 'Todo'] });
     const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, removed: true, folder: 'Todo' });
@@ -527,7 +529,7 @@ describe('DELETE /api/gtd/classify — remove a GTD label', () => {
   });
 
   it('returns removed:false when no copy exists in the state folder (nothing to delete)', async () => {
-    stubQueries({ sibling: null });
+    stubQueries({ sibling: null, folders: ['INBOX'] });
     const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true, removed: false });
@@ -542,14 +544,39 @@ describe('DELETE /api/gtd/classify — remove a GTD label', () => {
     expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
   });
 
-  it('does NOT require a Message-ID when the acted row already lives in the state folder', async () => {
+  it('does NOT require a Message-ID to resolve the copy when the acted row already lives in the state folder', async () => {
     // The acted-row case resolves its own uid directly, so a null Message-ID must not 400 here.
     // Pins the recently-narrowed guard (folder !== stateFolder) against a regression back to an
-    // unconditional Message-ID requirement.
+    // unconditional Message-ID requirement. Without one its other copies cannot be found, so the
+    // only-copy check refuses instead.
     stubQueries({ msg: { ...inboxMsg, folder: 'Todo', message_id: null } });
     const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ onlyCopy: true });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+  });
+
+  // A GTD folder can hold a message's only copy (mail the user filed there by moving it), and
+  // removing the label deletes that copy.
+  it('refuses with 409 when the state folder holds the only copy', async () => {
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo'] });
+    const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ onlyCopy: true, error: expect.stringMatching(/only copy/i) });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+  });
+
+  it('does not count a copy in Trash, which gets emptied', async () => {
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo', 'Trash'] });
+    const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
+    expect(res.status).toBe(409);
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+  });
+
+  it('removes the label when another GTD label still keeps the message', async () => {
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo', 'Watch'] });
+    const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ ok: true, removed: true, folder: 'Todo' });
     expect(imapManager.removeMessageCopy).toHaveBeenCalledWith(ACCT_ID, 10, 'Todo');
   });
 
@@ -561,7 +588,7 @@ describe('DELETE /api/gtd/classify — remove a GTD label', () => {
   });
 
   it('maps an IMAP delete failure to 500', async () => {
-    stubQueries({ sibling: { uid: 42 } });
+    stubQueries({ sibling: { uid: 42 }, folders: ['INBOX', 'Todo'] });
     imapManager.removeMessageCopy.mockRejectedValue(new Error('IMAP delete failed'));
     const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
     expect(res.status).toBe(500);

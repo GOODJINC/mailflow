@@ -686,7 +686,8 @@ export async function unclassifyThread(id, state, { gtdUnclassify, addNotificati
     addNotification({ title: t('gtd.removed'), body: t(`gtd.state.${state}`) });
   } catch (err) {
     console.error('GTD unclassify failed:', err.message);
-    addNotification({ title: t('gtd.removeFailed'), body: t(`gtd.state.${state}`) });
+    // 409: the GTD folder holds the message's only copy, so removing the label would delete it.
+    addNotification({ title: t('gtd.removeFailed'), body: err.status === 409 ? t('gtd.onlyCopy') : t(`gtd.state.${state}`) });
   }
 }
 

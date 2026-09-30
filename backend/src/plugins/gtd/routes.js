@@ -4,7 +4,7 @@ import { getGtdSections } from './gtdSections.js';
 import { queueGistGeneration } from './gtdGist.js';
 import { importPet, decodeUploadedSheet, getPetMeta, getPetSheet, parsePetSlug, customPetSlug } from './gtdPet.js';
 import { getGtdConfig, resolveGtdStateFolder, sanitizeGtdFolders, sanitizeGtdFoldersDetailed, DEFAULT_GTD_FOLDERS, planGtdFolderPersist, invalidateGtdConfigCache } from './gtdConfig.js';
-import { applyLabel, hasMessageCopy, resolveLabelCopyUid, removeExactLabelCopy, removeLabel, markThreadRead, ensureLabelFolders, archiveInboxCopy, broadcast, loadOwnedMessage, getOwnedAccount, getMessageCopyFolders, getMessagesByThreadKeys, getAccountConfig, setAccountConfig } from '../api.js';
+import { applyLabel, hasMessageCopy, resolveLabelCopyUid, removeExactLabelCopy, removeLabel, markThreadRead, ensureLabelFolders, archiveInboxCopy, broadcast, loadOwnedMessage, getOwnedAccount, getMessageCopyFolders, getMessagesByThreadKeys, getAccountConfig, setAccountConfig, resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths } from '../api.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -278,6 +278,22 @@ router.post('/classify/undo', async (req, res) => {
   }
 });
 
+// Whether a message keeps a live copy once the GTD copies in `removing` are deleted. Removing a
+// GTD copy deletes it, and a GTD folder can hold a message's only copy: mail the user filed there
+// by moving it. Drafts, Trash and Junk do not count, since those get emptied. Without a Message-ID
+// the other copies cannot be found, so it answers no.
+async function hasSurvivingCopy(account, messageIdHeader, removing) {
+  if (!messageIdHeader) return false;
+  const [drafts, trash, spam, copies] = await Promise.all([
+    resolveAllDraftsPaths(account.id, account.folder_mappings),
+    resolveAllTrashPaths(account.id, account.folder_mappings),
+    resolveAllSpamPaths(account.id, account.folder_mappings),
+    getMessageCopyFolders(account.id, messageIdHeader),
+  ]);
+  const unsafe = new Set([...removing, ...drafts, ...trash, ...spam]);
+  return copies.some(folder => !unsafe.has(folder));
+}
+
 // DELETE /api/gtd/classify { messageId, state } — remove a GTD label by deleting
 // the message's copy that lives in the state folder, leaving all other copies
 // (INBOX, other labels) intact. The acted message id identifies the thread member
@@ -301,6 +317,10 @@ router.delete('/classify', async (req, res) => {
   // needs no Message-ID — so guard it there and keep the explicit 400 the client relies on.
   if (msg.folder !== stateFolder && !msg.message_id) {
     return res.status(400).json({ error: 'Message has no Message-ID — cannot resolve GTD copy' });
+  }
+  const account = await getOwnedAccount(req.session.userId, msg.account_id);
+  if (!await hasSurvivingCopy(account, msg.message_id, [stateFolder])) {
+    return res.status(409).json({ error: 'This is the only copy of the message. Archive or move it instead.', onlyCopy: true });
   }
   try {
     const { removed } = await removeLabel(msg, stateFolder);
@@ -371,9 +391,22 @@ router.post('/done', async (req, res) => {
     ...target.folders.filter(f => f !== msg.folder),
     ...target.folders.filter(f => f === msg.folder),
   ];
+
+  // When nothing else keeps the message, the acted GTD copy is archived instead of deleted: it
+  // is the message's only copy (see hasSurvivingCopy). Without an acted GTD copy to keep, refuse
+  // rather than delete them all.
+  let keepActed = false;
+  if (!inboxCopy && stripOrder.length && !await hasSurvivingCopy(account, msg.message_id, stripOrder)) {
+    if (!stripOrder.includes(msg.folder)) {
+      return res.status(409).json({ error: 'This is the only copy of the message. Archive or move it instead.', onlyCopy: true });
+    }
+    keepActed = true;
+  }
+
   const removed = [];
   try {
     for (const folder of stripOrder) {
+      if (keepActed && folder === msg.folder) continue;
       const { removed: didRemove } = await removeLabel(msg, folder);
       if (didRemove) removed.push(folder);
     }
@@ -389,9 +422,11 @@ router.post('/done', async (req, res) => {
   let archived = false;
   let noArchiveFolder = false;
   let archiveFailed = false;
-  if (inboxCopy) {
+  const toArchive = inboxCopy || (keepActed ? msg : null);
+  if (toArchive) {
     try {
-      const result = await archiveInboxCopy(account, inboxCopy);
+      // A kept GTD copy is archived from its own folder; with no archive folder it stays put.
+      const result = await archiveInboxCopy(account, toArchive, inboxCopy ? 'INBOX' : msg.folder);
       archived = result.archived;
       noArchiveFolder = result.noArchiveFolder;
     } catch (err) {

@@ -1783,6 +1783,7 @@
     "classifyFailed": "Nie udało się zastosować etykiety",
     "removed": "Usunięto etykietę",
     "removeFailed": "Nie udało się usunąć etykiety",
+    "onlyCopy": "To jedyna kopia wiadomości, więc usunięcie etykiety by ją skasowało. Zamiast tego zarchiwizuj ją lub przenieś.",
     "done": "Oznacz jako wykonane",
     "doneFailed": "Nie udało się oznaczyć jako gotowe",
     "doneArchiveFailed": "Oznaczono jako gotowe, ale archiwizacja nie powiodła się — wiadomość nadal znajduje się w skrzynce odbiorczej",

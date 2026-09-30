@@ -1765,6 +1765,7 @@
     "undoFailed": "Couldn't undo label",
     "removed": "Label removed",
     "removeFailed": "Couldn't remove label",
+    "onlyCopy": "This is the only copy of the message, so removing the label would delete it. Archive or move it instead.",
     "done": "Mark done",
     "doneFailed": "Couldn't mark done",
     "doneArchiveFailed": "Marked done, but archiving failed — still in your Inbox",

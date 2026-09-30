@@ -18,6 +18,9 @@ vi.mock('../../utils/mailUtils.js', async (importOriginal) => {
     isAllMailFolder: vi.fn(),
     adjustFolderCounts: vi.fn(),
     fanOutReadToSiblings: vi.fn(),
+    resolveAllDraftsPaths: vi.fn(),
+    resolveAllTrashPaths: vi.fn(),
+    resolveAllSpamPaths: vi.fn(),
   };
 });
 vi.mock('./gtdConfig.js', async (importOriginal) => {
@@ -28,7 +31,7 @@ vi.mock('./gtdConfig.js', async (importOriginal) => {
 import express from 'express';
 import { query } from '../../services/db.js';
 import { setMailEngine } from '../mailEngine.js';
-import { resolveArchiveFolder, isAllMailFolder, adjustFolderCounts, fanOutReadToSiblings } from '../../utils/mailUtils.js';
+import { resolveArchiveFolder, isAllMailFolder, adjustFolderCounts, fanOutReadToSiblings, resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths } from '../../utils/mailUtils.js';
 import { getGtdConfig, DEFAULT_GTD_FOLDERS } from './gtdConfig.js';
 
 // The done route's mail actions (label strip, mark-read, archive, broadcast) go through the bound
@@ -62,9 +65,11 @@ function buildApp() {
 
 // Route every query /done issues; archiveWrite is the swappable rowCount of the INBOX row's
 // archive UPDATE/DELETE — the authority for whether this call or a concurrent /done won the race.
-function stubQueries({ inbox = inboxCopy, archiveWrite = { rowCount: 1 } } = {}) {
+// `copies` is where the message's live copies are, for the only-copy check.
+function stubQueries({ row = msg, inbox = inboxCopy, archiveWrite = { rowCount: 1 }, copies = [] } = {}) {
   query.mockImplementation(async (sql) => {
-    if (sql.includes('FROM messages m') && sql.includes('JOIN email_accounts')) return { rows: [msg] };
+    if (sql.startsWith('SELECT DISTINCT folder FROM messages')) return { rows: copies.map(folder => ({ folder })) };
+    if (sql.includes('FROM messages m') && sql.includes('JOIN email_accounts')) return { rows: [row] };
     if (sql.startsWith('SELECT * FROM email_accounts')) return { rows: [account] };
     if (sql.startsWith('SELECT id, uid, is_read FROM messages')) return { rows: inbox ? [inbox] : [] };
     if (sql.startsWith('SELECT uid FROM messages')) return { rows: [{ uid: 10 }] };
@@ -97,6 +102,10 @@ beforeEach(() => {
   resolveArchiveFolder.mockResolvedValue('Archive');
   isAllMailFolder.mockResolvedValue(false);
   fanOutReadToSiblings.mockResolvedValue(undefined);
+  [resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths].forEach(fn => fn.mockReset());
+  resolveAllDraftsPaths.mockResolvedValue(new Set(['Drafts']));
+  resolveAllTrashPaths.mockResolvedValue(new Set(['Trash']));
+  resolveAllSpamPaths.mockResolvedValue(new Set(['Junk']));
 });
 
 describe('POST /api/gtd/done — id validation', () => {
@@ -192,5 +201,62 @@ describe('POST /api/gtd/done — strip-ok + archive-fail', () => {
     const strippedFolders = imapManager.removeMessageCopy.mock.calls.map(c => c[2]);
     expect(strippedFolders).not.toContain('Watch');
     expect(imapManager.moveMessage).not.toHaveBeenCalled(); // never reached the archive step
+  });
+});
+
+// A GTD folder can hold a message's only copy: mail the user filed there by moving it. Done must
+// not delete it; it archives that copy instead.
+describe('POST /api/gtd/done — a GTD folder holding the only copy', () => {
+  it('archives the acted copy instead of deleting it', async () => {
+    stubQueries({ inbox: null, copies: ['Watch'] });
+    imapManager.moveMessage.mockResolvedValue(91);
+    const res = await done({ id: MSG_ID, states: ['watch'] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ ok: true, archived: true });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+    expect(imapManager.moveMessage).toHaveBeenCalledWith(expect.anything(), 10, 'Watch', 'Archive');
+  });
+
+  it('still strips its other GTD copies, keeping only the acted one', async () => {
+    stubQueries({ inbox: null, copies: ['Watch', 'Delegated'] });
+    imapManager.moveMessage.mockResolvedValue(91);
+    const res = await done({ id: MSG_ID, states: ['watch', 'delegated'] });
+    expect(res.status).toBe(200);
+    expect(imapManager.removeMessageCopy.mock.calls.map(c => c[2])).toEqual(['Delegated']);
+    expect(imapManager.moveMessage).toHaveBeenCalledWith(expect.anything(), 10, 'Watch', 'Archive');
+  });
+
+  it('does not count a copy in Trash, which gets emptied', async () => {
+    stubQueries({ inbox: null, copies: ['Watch', 'Trash'] });
+    imapManager.moveMessage.mockResolvedValue(91);
+    await done({ id: MSG_ID, states: ['watch'] });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+    expect(imapManager.moveMessage).toHaveBeenCalledWith(expect.anything(), 10, 'Watch', 'Archive');
+  });
+
+  it('strips as before when another live copy keeps the message', async () => {
+    stubQueries({ inbox: null, copies: ['Watch', 'Receipts'] });
+    const res = await done({ id: MSG_ID, states: ['watch'] });
+    expect(res.status).toBe(200);
+    expect(imapManager.removeMessageCopy.mock.calls.map(c => c[2])).toEqual(['Watch']);
+    expect(imapManager.moveMessage).not.toHaveBeenCalled();
+  });
+
+  it('refuses with 409 when the only copies are ones it would strip and none is the acted copy', async () => {
+    stubQueries({ row: { ...msg, folder: 'Trash' }, inbox: null, copies: ['Trash', 'Todo'] });
+    const res = await done({ id: MSG_ID, states: ['todo'] });
+    expect(res.status).toBe(409);
+    expect(await res.json()).toMatchObject({ onlyCopy: true });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+  });
+
+  it('keeps the copy where it is when the account has no archive folder', async () => {
+    stubQueries({ inbox: null, copies: ['Watch'] });
+    resolveArchiveFolder.mockResolvedValue(null);
+    const res = await done({ id: MSG_ID, states: ['watch'] });
+    expect(res.status).toBe(200);
+    expect(await res.json()).toMatchObject({ archived: false, noArchiveFolder: true });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+    expect(imapManager.moveMessage).not.toHaveBeenCalled();
   });
 });

@@ -1765,6 +1765,7 @@
     "undoFailed": "Label konnte nicht rückgängig gemacht werden",
     "removed": "Label entfernt",
     "removeFailed": "Label konnte nicht entfernt werden",
+    "onlyCopy": "Dies ist die einzige Kopie der Nachricht. Das Entfernen der Markierung würde sie löschen. Archivieren oder verschieben Sie sie stattdessen.",
     "done": "Als erledigt markieren",
     "doneFailed": "Konnte nicht als erledigt markiert werden",
     "doneArchiveFailed": "Als erledigt markiert, aber Archivieren fehlgeschlagen – noch im Posteingang",

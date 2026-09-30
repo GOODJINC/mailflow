@@ -1549,4 +1549,15 @@ describe('unclassifyThread', () => {
     await unclassifyThread('m1', 'todo', deps);
     assert.deepEqual(calls, [['notify', 'gtd.removeFailed', 'gtd.state.todo']]);
   });
+  it('says why when the server refuses because the GTD folder holds the only copy', async () => {
+    const calls = [];
+    const deps = {
+      gtdUnclassify: async () => { throw Object.assign(new Error('only copy'), { status: 409 }); },
+      addNotification: (n) => calls.push(['notify', n.title, n.body]),
+      scheduleGtdSectionsFetch: () => calls.push(['schedule']),
+      t,
+    };
+    await unclassifyThread('m1', 'todo', deps);
+    assert.deepEqual(calls, [['notify', 'gtd.removeFailed', 'gtd.onlyCopy']]);
+  });
 });
