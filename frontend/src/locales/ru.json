@@ -226,6 +226,8 @@
     "delete": "Удалить",
     "downloadEml": "Скачать как .eml",
     "print": "Печать",
+    "printConversation": "Печать переписки",
+    "preparingPrint": "Подготовка к печати…",
     "more": "Ещё",
     "summarize": "Резюмировать",
     "summary": "Краткое изложение",

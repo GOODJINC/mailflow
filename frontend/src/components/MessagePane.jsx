@@ -11,7 +11,6 @@ import { clearDeleteGuard, clearPendingDelete, setCompletedDelete, setPendingDel
 import { pendingMarkReadMap, completedMarkReadMap, setPending } from '../utils/pendingReads.js';
 import { applyMarkRead, scheduleMarkRead, cancelScheduledMarkRead, cancelScheduledMarkReadFor } from '../utils/markRead.js';
 import { markMessageUnread } from '../utils/messageHotkeys.js';
-import DOMPurify from 'dompurify';
 import { BUILTIN_SUMMARIZE, summarizePromptForLocale } from '../aiActions.js';
 import { getResults, saveResult, removeResult } from '../aiResults.js';
 import { aiRuns } from '../utils/aiRunRegistry.js';
@@ -25,6 +24,7 @@ import SpamBadge from './SpamBadge.jsx';
 import SpamExplainModal from './SpamExplainModal.jsx';
 import { classifyAttachmentRisk } from '../utils/attachmentRisk.js';
 import { downloadEml } from '../utils/downloadEml.js';
+import { buildPrintDocument, openPrintWindow, printInWindow } from '../utils/printMessage.js';
 const USE_DIV_RENDER = import.meta.env.VITE_EMAIL_DIV_RENDER === 'true';
 const MESSAGE_OPENING_EVENT = 'mailflow:message-opening';
 // riskArmed value for the "Download all" link. A Symbol, so no attachment part can ever equal it.
@@ -788,52 +788,7 @@ export default function MessagePane({ windowMessageId = null, onWindowClose = nu
 
   const handlePrint = () => {
     if (!message) return;
-    const esc = (s) => (s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-    const date = message.date ? new Date(message.date).toLocaleString() : '';
-    const fromStr = message.from_name
-      ? `${esc(message.from_name)} &lt;${esc(message.from_email)}&gt;`
-      : esc(message.from_email);
-
-    const parseList = (raw) => {
-      try { return Array.isArray(raw) ? raw : JSON.parse(raw || '[]'); } catch { return []; }
-    };
-    const fmtAddr = (r) => r.name ? `${esc(r.name)} &lt;${esc(r.email)}&gt;` : esc(r.email);
-    const toStr = parseList(message.to_addresses).map(fmtAddr).join(', ');
-    const ccStr = parseList(message.cc_addresses).map(fmtAddr).join(', ');
-
-    const bodyContent = body?.html
-      ? DOMPurify.sanitize(body.html, { ADD_ATTR: ['target'] })
-      : body?.text
-        ? `<pre style="white-space:pre-wrap;font-family:sans-serif;font-size:14px">${esc(body.text)}</pre>`
-        : '';
-
-    const win = window.open('', '_blank');
-    if (!win) return;
-    // CSP blocks any script execution in this same-origin print window (it has no
-    // sandbox); combined with the DOMPurify pass above this neutralizes email HTML.
-    win.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="script-src 'none'; object-src 'none'; base-uri 'none'"><title>${esc(message.subject)}</title>
-<style>
-  body { font-family: Arial, sans-serif; font-size: 14px; color: #111; margin: 32px; }
-  .header { border-bottom: 1px solid #ccc; padding-bottom: 16px; margin-bottom: 24px; }
-  .header h1 { font-size: 18px; margin: 0 0 12px; }
-  .meta { font-size: 13px; color: #444; line-height: 1.8; }
-  .meta span { font-weight: 600; color: #111; }
-  @media print { body { margin: 16px; } }
-</style></head><body>
-<div class="header">
-  <h1>${esc(message.subject) || '(no subject)'}</h1>
-  <div class="meta">
-    <div><span>From:</span> ${fromStr}</div>
-    <div><span>To:</span> ${toStr}</div>
-    ${ccStr ? `<div><span>Cc:</span> ${ccStr}</div>` : ''}
-    <div><span>Date:</span> ${date}</div>
-  </div>
-</div>
-${bodyContent}
-</body></html>`);
-    win.document.close();
-    win.focus();
-    win.print();
+    printInWindow(openPrintWindow(), buildPrintDocument([{ message, body }]));
   };
 
   // Label shown on a result box for a given action key. The built-in summarize

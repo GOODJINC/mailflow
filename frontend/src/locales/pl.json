@@ -228,6 +228,8 @@
     "delete": "Usuń",
     "downloadEml": "Pobierz jako .eml",
     "print": "Drukuj",
+    "printConversation": "Drukuj konwersację",
+    "preparingPrint": "Przygotowywanie wydruku…",
     "more": "Więcej",
     "summarize": "Podsumuj",
     "summary": "Podsumowanie",

@@ -346,6 +346,8 @@
     "delete": "Smazat",
     "downloadEml": "Stáhnout jako .eml",
     "print": "Vytisknout",
+    "printConversation": "Vytisknout konverzaci",
+    "preparingPrint": "Příprava tisku…",
     "more": "Další",
     "summarize": "Shrnout",
     "summary": "Shrnutí",

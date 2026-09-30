@@ -226,6 +226,8 @@
     "delete": "删除",
     "downloadEml": "下载为 .eml",
     "print": "打印",
+    "printConversation": "打印会话",
+    "preparingPrint": "正在准备打印…",
     "more": "更多",
     "summarize": "摘要",
     "summary": "邮件摘要",

@@ -226,6 +226,8 @@
     "delete": "Supprimer",
     "downloadEml": "Télécharger en .eml",
     "print": "Imprimer",
+    "printConversation": "Imprimer la conversation",
+    "preparingPrint": "Préparation de l'impression…",
     "more": "Plus",
     "summarize": "Résumer",
     "summary": "Résumé",
