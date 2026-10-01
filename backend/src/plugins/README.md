@@ -54,7 +54,7 @@ npm test               # full suite
 Everything a plugin may do, grouped:
 
 - **Labels (read):** `listThreadHeadsByLabels`, `notifyOnLabelTouch`
-- **Labels (write):** `applyLabel`, `removeLabel`, `markThreadRead`, `ensureLabelFolders`, `resolveLabelCopyUid`
+- **Labels (write):** `applyLabel`, `removeLabel`, `markThreadRead`, `markCopySeen`, `ensureLabelFolders`, `resolveLabelCopyUid`
 - **Archive:** `archiveInboxCopy`
 - **Realtime:** `broadcast` (scoped to one user)
 - **Summarize:** `summarizeMessage`, `summarizeAvailable` (fails closed when the AI provider is off)

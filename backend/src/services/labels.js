@@ -116,3 +116,17 @@ export async function markThreadRead(imapManager, account, message) {
   }
   return { inboxCopy };
 }
+
+// Best-effort \Seen on one copy, for when a copy other than INBOX is the durable one (GTD Done
+// archiving a message's only copy, #524). The DB side is markThreadRead's fan-out; without the
+// flag the next sync of the destination folder reads the copy back as unread. Never throws.
+// `message` needs { uid, folder, is_read }.
+export async function markCopySeen(imapManager, account, message) {
+  if (message.is_read) return {};
+  try {
+    await imapManager.setFlag(account, message.uid, message.folder, '\\Seen', true);
+  } catch (err) {
+    return { error: err };
+  }
+  return {};
+}

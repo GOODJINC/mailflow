@@ -38,6 +38,7 @@ export const applyLabel = (account, message, labelFolder, options) => labelsWrit
 export const removeLabel = (message, labelFolder) => labelsWrite.removeLabel(getMailEngine(), message, labelFolder);
 export const removeExactLabelCopy = (message, labelFolder, uid) => labelsWrite.removeExactLabelCopy(getMailEngine(), message, labelFolder, uid);
 export const markThreadRead = (account, message) => labelsWrite.markThreadRead(getMailEngine(), account, message);
+export const markCopySeen = (account, message) => labelsWrite.markCopySeen(getMailEngine(), account, message);
 export const ensureLabelFolders = (account, folderPaths) => labelsWrite.ensureLabelFolders(getMailEngine(), account, folderPaths);
 export const resolveLabelCopyUid = labelsWrite.resolveLabelCopyUid;
 

@@ -250,6 +250,31 @@ describe('POST /api/gtd/done — a GTD folder holding the only copy', () => {
     expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
   });
 
+  // The kept copy is the durable one now; without \Seen the next sync of Archive reads it back
+  // as unread.
+  it('marks an unread kept copy \\Seen before archiving it', async () => {
+    stubQueries({ row: { ...msg, is_read: false }, inbox: null, copies: ['Watch'] });
+    imapManager.moveMessage.mockResolvedValue(91);
+    await done({ id: MSG_ID, states: ['watch'] });
+    expect(imapManager.setFlag).toHaveBeenCalledWith(expect.anything(), 10, 'Watch', '\\Seen', true);
+    expect(imapManager.setFlag.mock.invocationCallOrder[0]).toBeLessThan(imapManager.moveMessage.mock.invocationCallOrder[0]);
+  });
+
+  it('sends no flag for a kept copy that is already read', async () => {
+    stubQueries({ inbox: null, copies: ['Watch'] });
+    imapManager.moveMessage.mockResolvedValue(91);
+    await done({ id: MSG_ID, states: ['watch'] });
+    expect(imapManager.setFlag).not.toHaveBeenCalled();
+  });
+
+  it('still archives when the flag push fails', async () => {
+    stubQueries({ row: { ...msg, is_read: false }, inbox: null, copies: ['Watch'] });
+    imapManager.setFlag.mockRejectedValue(new Error('STORE failed'));
+    imapManager.moveMessage.mockResolvedValue(91);
+    const res = await done({ id: MSG_ID, states: ['watch'] });
+    expect(await res.json()).toMatchObject({ archived: true });
+  });
+
   it('keeps the copy where it is when the account has no archive folder', async () => {
     stubQueries({ inbox: null, copies: ['Watch'] });
     resolveArchiveFolder.mockResolvedValue(null);

@@ -4,7 +4,7 @@ import { getGtdSections } from './gtdSections.js';
 import { queueGistGeneration } from './gtdGist.js';
 import { importPet, decodeUploadedSheet, getPetMeta, getPetSheet, parsePetSlug, customPetSlug } from './gtdPet.js';
 import { getGtdConfig, resolveGtdStateFolder, sanitizeGtdFolders, sanitizeGtdFoldersDetailed, DEFAULT_GTD_FOLDERS, planGtdFolderPersist, invalidateGtdConfigCache } from './gtdConfig.js';
-import { applyLabel, hasMessageCopy, resolveLabelCopyUid, removeExactLabelCopy, removeLabel, markThreadRead, ensureLabelFolders, archiveInboxCopy, broadcast, loadOwnedMessage, getOwnedAccount, getMessageCopyFolders, getMessagesByThreadKeys, getAccountConfig, setAccountConfig, resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths } from '../api.js';
+import { applyLabel, hasMessageCopy, resolveLabelCopyUid, removeExactLabelCopy, removeLabel, markThreadRead, markCopySeen, ensureLabelFolders, archiveInboxCopy, broadcast, loadOwnedMessage, getOwnedAccount, getMessageCopyFolders, getMessagesByThreadKeys, getAccountConfig, setAccountConfig, resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths } from '../api.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -425,7 +425,12 @@ router.post('/done', async (req, res) => {
   const toArchive = inboxCopy || (keepActed ? msg : null);
   if (toArchive) {
     try {
-      // A kept GTD copy is archived from its own folder; with no archive folder it stays put.
+      // A kept GTD copy is archived from its own folder; with no archive folder it stays put. It
+      // is now the durable copy, so it takes the \Seen that (a) set on INBOX only.
+      if (!inboxCopy) {
+        const { error } = await markCopySeen(account, msg);
+        if (error) console.warn(`GTD done: mark-read for ${id} degraded:`, error.message);
+      }
       const result = await archiveInboxCopy(account, toArchive, inboxCopy ? 'INBOX' : msg.folder);
       archived = result.archived;
       noArchiveFolder = result.noArchiveFolder;
