@@ -60,7 +60,8 @@
     "files": [
       "packages/electron/**/*",
       "packages/native-shell/**/*",
-      "package.json"
+      "package.json",
+      "!**/node_modules/@napi-rs/**"
     ],
     "win": {
       "artifactName": "${productName}-${version}-Setup.${ext}",
