@@ -31,6 +31,7 @@ const imapManager = {
   hasMessageCopy: vi.fn(),
   removeMessageCopy: vi.fn(),
   broadcast: vi.fn(),
+  isLabelStore: vi.fn(),
 };
 setMailEngine(imapManager);
 
@@ -103,7 +104,9 @@ beforeEach(() => {
   getGtdConfig.mockReset();
   getGtdConfig.mockResolvedValue({ enabled: true, folders: DEFAULT_GTD_FOLDERS });
   imapManager.copyMessage.mockResolvedValue(77);
+  // By default the server confirms a surviving copy, and the account is not Gmail.
   imapManager.hasMessageCopy.mockResolvedValue(true);
+  imapManager.isLabelStore.mockReturnValue(false);
   stubQueries();
 });
 
@@ -573,8 +576,36 @@ describe('DELETE /api/gtd/classify — remove a GTD label', () => {
     expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
   });
 
+  // A row can outlive its message for a while after another client moves it.
+  it('refuses when the server does not confirm the other copy', async () => {
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo', 'INBOX'], siblings: { INBOX: 55 } });
+    imapManager.hasMessageCopy.mockResolvedValue(false);
+    const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
+    expect(res.status).toBe(409);
+    expect(imapManager.hasMessageCopy).toHaveBeenCalledWith(account, 55, 'INBOX', '<m@x>');
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+  });
+
+  it('refuses when the confirmation fails', async () => {
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo', 'INBOX'], siblings: { INBOX: 55 } });
+    imapManager.hasMessageCopy.mockRejectedValue(new Error('connection refused'));
+    const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
+    expect(res.status).toBe(409);
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+  });
+
+  // Gmail: removing a GTD label leaves the message in All Mail, which MailFlow does not sync, so
+  // its GTD rows are often the only ones MailFlow has.
+  it('removes the label on Gmail even when it holds the only synced copy', async () => {
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo'] });
+    imapManager.isLabelStore.mockReturnValue(true);
+    const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
+    expect(res.status).toBe(200);
+    expect(imapManager.removeMessageCopy).toHaveBeenCalledWith(ACCT_ID, 10, 'Todo');
+  });
+
   it('removes the label when another GTD label still keeps the message', async () => {
-    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo', 'Watch'] });
+    stubQueries({ msg: { ...inboxMsg, folder: 'Todo' }, folders: ['Todo', 'Watch'], siblings: { Watch: 41 } });
     const res = await unclassify({ messageId: MSG_ID, state: 'todo' });
     expect(res.status).toBe(200);
     expect(imapManager.removeMessageCopy).toHaveBeenCalledWith(ACCT_ID, 10, 'Todo');

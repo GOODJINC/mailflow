@@ -5421,6 +5421,12 @@ export class ImapManager {
     ]);
   }
 
+  // Whether the account's folders are label memberships (Gmail): removing a message from one
+  // drops that label and leaves the message in All Mail, which MailFlow does not sync.
+  isLabelStore(account) {
+    return providerProfile(account).labelStore === true;
+  }
+
   // A cached sibling is not evidence that mail survives an automatic label strip.
   // Check the exact physical UID and RFC identity on the server, without SEARCH's
   // substring matching. Errors propagate so the caller conservatively keeps mail.

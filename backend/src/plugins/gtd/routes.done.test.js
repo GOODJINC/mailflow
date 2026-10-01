@@ -43,6 +43,8 @@ const imapManager = {
   _guardMoveUid: vi.fn(),
   _unguardMoveUid: vi.fn(),
   broadcast: vi.fn(),
+  hasMessageCopy: vi.fn(),
+  isLabelStore: vi.fn(),
 };
 setMailEngine(imapManager);
 import gtdRoutes from './routes.js';
@@ -106,6 +108,9 @@ beforeEach(() => {
   resolveAllDraftsPaths.mockResolvedValue(new Set(['Drafts']));
   resolveAllTrashPaths.mockResolvedValue(new Set(['Trash']));
   resolveAllSpamPaths.mockResolvedValue(new Set(['Junk']));
+  // By default the server confirms a surviving copy, and the account is not Gmail.
+  imapManager.hasMessageCopy.mockResolvedValue(true);
+  imapManager.isLabelStore.mockReturnValue(false);
 });
 
 describe('POST /api/gtd/done — id validation', () => {
@@ -273,6 +278,36 @@ describe('POST /api/gtd/done — a GTD folder holding the only copy', () => {
     imapManager.moveMessage.mockResolvedValue(91);
     const res = await done({ id: MSG_ID, states: ['watch'] });
     expect(await res.json()).toMatchObject({ archived: true });
+  });
+
+  // A row can outlive its message for a while after another client moves it.
+  it('archives instead of stripping when the server does not confirm the other copy', async () => {
+    stubQueries({ inbox: null, copies: ['Watch', 'Receipts'] });
+    imapManager.hasMessageCopy.mockResolvedValue(false);
+    imapManager.moveMessage.mockResolvedValue(91);
+    await done({ id: MSG_ID, states: ['watch'] });
+    expect(imapManager.hasMessageCopy).toHaveBeenCalledWith(expect.anything(), 10, 'Receipts', '<m@x>');
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+    expect(imapManager.moveMessage).toHaveBeenCalledWith(expect.anything(), 10, 'Watch', 'Archive');
+  });
+
+  it('treats a failed confirmation as no copy', async () => {
+    stubQueries({ inbox: null, copies: ['Watch', 'Receipts'] });
+    imapManager.hasMessageCopy.mockRejectedValue(new Error('connection refused'));
+    imapManager.moveMessage.mockResolvedValue(91);
+    await done({ id: MSG_ID, states: ['watch'] });
+    expect(imapManager.removeMessageCopy).not.toHaveBeenCalled();
+    expect(imapManager.moveMessage).toHaveBeenCalledWith(expect.anything(), 10, 'Watch', 'Archive');
+  });
+
+  // Gmail: removing a GTD label leaves the message in All Mail, which MailFlow does not sync.
+  it('strips as before on Gmail, where the message stays in All Mail', async () => {
+    stubQueries({ inbox: null, copies: ['Watch'] });
+    imapManager.isLabelStore.mockReturnValue(true);
+    await done({ id: MSG_ID, states: ['watch'] });
+    expect(imapManager.removeMessageCopy.mock.calls.map(c => c[2])).toEqual(['Watch']);
+    expect(imapManager.moveMessage).not.toHaveBeenCalled();
+    expect(imapManager.hasMessageCopy).not.toHaveBeenCalled();
   });
 
   it('keeps the copy where it is when the account has no archive folder', async () => {

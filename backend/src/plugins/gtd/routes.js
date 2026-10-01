@@ -4,7 +4,7 @@ import { getGtdSections } from './gtdSections.js';
 import { queueGistGeneration } from './gtdGist.js';
 import { importPet, decodeUploadedSheet, getPetMeta, getPetSheet, parsePetSlug, customPetSlug } from './gtdPet.js';
 import { getGtdConfig, resolveGtdStateFolder, sanitizeGtdFolders, sanitizeGtdFoldersDetailed, DEFAULT_GTD_FOLDERS, planGtdFolderPersist, invalidateGtdConfigCache } from './gtdConfig.js';
-import { applyLabel, hasMessageCopy, resolveLabelCopyUid, removeExactLabelCopy, removeLabel, markThreadRead, markCopySeen, ensureLabelFolders, archiveInboxCopy, broadcast, loadOwnedMessage, getOwnedAccount, getMessageCopyFolders, getMessagesByThreadKeys, getAccountConfig, setAccountConfig, resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths } from '../api.js';
+import { applyLabel, hasMessageCopy, resolveLabelCopyUid, removeExactLabelCopy, removeLabel, markThreadRead, markCopySeen, isLabelStoreAccount, ensureLabelFolders, archiveInboxCopy, broadcast, loadOwnedMessage, getOwnedAccount, getMessageCopyFolders, getMessagesByThreadKeys, getAccountConfig, setAccountConfig, resolveAllDraftsPaths, resolveAllTrashPaths, resolveAllSpamPaths } from '../api.js';
 
 const router = Router();
 router.use(requireAuth);
@@ -280,18 +280,32 @@ router.post('/classify/undo', async (req, res) => {
 
 // Whether a message keeps a live copy once the GTD copies in `removing` are deleted. Removing a
 // GTD copy deletes it, and a GTD folder can hold a message's only copy: mail the user filed there
-// by moving it. Drafts, Trash and Junk do not count, since those get emptied. Without a Message-ID
-// the other copies cannot be found, so it answers no.
-async function hasSurvivingCopy(account, messageIdHeader, removing) {
-  if (!messageIdHeader) return false;
+// by moving it. Drafts, Trash and Junk do not count, since those get emptied. A row can outlive
+// its message for a while after another client moves it, so a copy counts only once the server
+// confirms it; a failed check counts as no copy, which keeps the mail. Without a Message-ID the
+// other copies cannot be found, so it answers no. On Gmail it is always yes: a GTD folder is a
+// label, and removing it leaves the message in All Mail, which MailFlow does not sync.
+async function hasSurvivingCopy(account, msg, removing) {
+  if (isLabelStoreAccount(account)) return true;
+  if (!msg.message_id) return false;
   const [drafts, trash, spam, copies] = await Promise.all([
     resolveAllDraftsPaths(account.id, account.folder_mappings),
     resolveAllTrashPaths(account.id, account.folder_mappings),
     resolveAllSpamPaths(account.id, account.folder_mappings),
-    getMessageCopyFolders(account.id, messageIdHeader),
+    getMessageCopyFolders(account.id, msg.message_id),
   ]);
   const unsafe = new Set([...removing, ...drafts, ...trash, ...spam]);
-  return copies.some(folder => !unsafe.has(folder));
+  for (const folder of copies) {
+    if (unsafe.has(folder)) continue;
+    const uid = await resolveLabelCopyUid(msg, folder);
+    if (uid == null) continue;
+    try {
+      if (await hasMessageCopy(account, uid, folder, msg.message_id)) return true;
+    } catch (err) {
+      console.warn(`GTD: could not confirm the copy in ${folder}: ${err.message}`);
+    }
+  }
+  return false;
 }
 
 // DELETE /api/gtd/classify { messageId, state } — remove a GTD label by deleting
@@ -319,7 +333,7 @@ router.delete('/classify', async (req, res) => {
     return res.status(400).json({ error: 'Message has no Message-ID — cannot resolve GTD copy' });
   }
   const account = await getOwnedAccount(req.session.userId, msg.account_id);
-  if (!await hasSurvivingCopy(account, msg.message_id, [stateFolder])) {
+  if (!await hasSurvivingCopy(account, msg, [stateFolder])) {
     return res.status(409).json({ error: 'This is the only copy of the message. Archive or move it instead.', onlyCopy: true });
   }
   try {
@@ -396,7 +410,7 @@ router.post('/done', async (req, res) => {
   // is the message's only copy (see hasSurvivingCopy). Without an acted GTD copy to keep, refuse
   // rather than delete them all.
   let keepActed = false;
-  if (!inboxCopy && stripOrder.length && !await hasSurvivingCopy(account, msg.message_id, stripOrder)) {
+  if (!inboxCopy && stripOrder.length && !await hasSurvivingCopy(account, msg, stripOrder)) {
     if (!stripOrder.includes(msg.folder)) {
       return res.status(409).json({ error: 'This is the only copy of the message. Archive or move it instead.', onlyCopy: true });
     }

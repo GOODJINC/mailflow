@@ -53,7 +53,7 @@ npm test               # full suite
 
 Everything a plugin may do, grouped:
 
-- **Labels (read):** `listThreadHeadsByLabels`, `notifyOnLabelTouch`
+- **Labels (read):** `listThreadHeadsByLabels`, `notifyOnLabelTouch`, `hasMessageCopy` (checks one copy on the server), `isLabelStoreAccount` (Gmail: folders are labels)
 - **Labels (write):** `applyLabel`, `removeLabel`, `markThreadRead`, `markCopySeen`, `ensureLabelFolders`, `resolveLabelCopyUid`
 - **Archive:** `archiveInboxCopy`
 - **Realtime:** `broadcast` (scoped to one user)

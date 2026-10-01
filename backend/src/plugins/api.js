@@ -29,6 +29,7 @@ export { notifyOnLabelTouch } from '../services/labelsRead.js';
 
 // Verify a physical copy's live RFC Message-ID before it authorizes another deletion.
 export const hasMessageCopy = (account, uid, folder, messageId) => getMailEngine().hasMessageCopy(account, uid, folder, messageId);
+export const isLabelStoreAccount = (account) => getMailEngine().isLabelStore(account);
 
 // ── Labels (write) ────────────────────────────────────────────────────────────
 // Apply/remove a label (a message copy in a label folder) and mark a thread read. The mail
